@@ -1,0 +1,115 @@
+version: "3.8"
+services:
+
+  zookeeper:
+    image: confluentinc/cp-zookeeper:latest
+    container_name: shared-zookeeper
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+    ports: ["2181:2181"]
+
+  kafka:
+    image: confluentinc/cp-kafka:latest
+    container_name: shared-kafka
+    depends_on: [zookeeper]
+    environment:
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,DOCKER://localhost:19092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,DOCKER:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_MIN_IN_SYNC_REPLICAS: 1
+    ports: ["19092:19092"]
+
+  auth-postgres:
+    image: postgres:latest
+    container_name: auth-postgres
+    environment:
+      POSTGRES_DB: auth
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes: ["auth-postgres-data:/var/lib/postgresql/data"]
+    ports: ["5433:5432"]
+
+  news-postgres:
+    image: postgres:latest
+    container_name: news-postgres
+    environment:
+      POSTGRES_DB: news
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes: ["news-postgres-data:/var/lib/postgresql/data"]
+    ports: ["5434:5432"]
+
+  comment-postgres:
+    image: postgres:latest
+    container_name: comment-postgres
+    environment:
+      POSTGRES_DB: comment
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes: ["comment-postgres-data:/var/lib/postgresql/data"]
+    ports: ["5435:5432"]
+
+  auth:
+    build:
+      context: ./auth
+      dockerfile: Dockerfile
+    container_name: auth
+    depends_on: [auth-postgres]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://auth-postgres:5432/auth
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      JWT_SECRET: ${JWT_SECRET}
+    ports: ["8081:8081"]
+
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: gateway
+    depends_on: [auth]
+    environment:
+      services__auth: http://auth:8081
+      services__news: http://news:8083
+      services__comment: http://comment:8084
+    ports: ["8080:8080"]
+
+  news:
+    build:
+      context: ./news
+      dockerfile: Dockerfile
+    container_name: news
+    depends_on: [news-postgres, kafka]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://news-postgres:5432/news
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports: ["8083:8083"]
+
+  comment:
+    build:
+      context: ./comment
+      dockerfile: Dockerfile
+    container_name: comment
+    depends_on: [comment-postgres, kafka]
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://comment-postgres:5432/comment
+      JWT_SECRET: ${JWT_SECRET}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+    ports: ["8084:8084"]
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8080
+    ports: ["3000:3000"]
+
+volumes:
+  auth-postgres-data:
+  news-postgres-data:
+  comment-postgres-data:
